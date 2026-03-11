@@ -20,7 +20,7 @@ cd ..
 To install WatAnalysis, clone the repository and run the following commands in the repository root:
 
 ```bash
-git clone https://github.com/ChiahsinChu/WatAnalysis.git
+git clone https://github.com/jpqiu/WatAnalysis.git
 cd WatAnalysis
 pip install .
 ```
@@ -39,12 +39,15 @@ pip install .
 
 ### Supported functions
 
-- density profile: `DensityAnalysis`
+- density and costheta profile: `DensityCosthetaAnalysis`
 - dipole angular distribution: `AngularDistribution`
 - hydrogen bond: `HydrogenBondAnalysis`
-- correlation function:
+- hydrogen bond density: `HydrogenBondDensityAnalysis`
+- kinetic properties:
   - survivial probability: `SurvivalProbability`
   - flux correlation function: `FluxCorrelationFunction`
   - water reorientation: `WaterReorientation`
+  - interfacial: `Surface2DMSD`
+  - hydrogen bond lifetime: `HydrogenBondLifetime`
 
 ## Developer Guide
