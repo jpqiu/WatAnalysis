@@ -3,6 +3,7 @@ from typing import Dict
 
 import freud
 import numpy as np
+import pandas as pd
 from ase import geometry
 from MDAnalysis.lib.distances import (
     calc_angles,
@@ -22,8 +23,8 @@ from WatAnalysis.workflow.base import (
 class HydrogenBondAnalysis(SingleAnalysis):
     def __init__(
         self,
-        oxygen_sel: str = "name O",
-        hydrogens_sel: str = "name H",
+        selection_oxygen: str = "name O",
+        selection_hydrogen: str = "name H",
         label: str = "oxygen",
         OH_cutoff: float = 1.3,
         HB_cutoff: Dict[str, float] = None,
@@ -31,8 +32,8 @@ class HydrogenBondAnalysis(SingleAnalysis):
     ) -> None:
         super().__init__()
 
-        self.oxygen_sel = oxygen_sel
-        self.hydrogens_sel = hydrogens_sel
+        self.selection_oxygen = selection_oxygen
+        self.selection_hydrogen = selection_hydrogen
 
         self.label = label
         self.OH_cutoff = OH_cutoff
@@ -50,21 +51,21 @@ class HydrogenBondAnalysis(SingleAnalysis):
                 f"donor_z_{self.label}",
                 atomic=True,
                 dim=max_HB,
-                selection=self.oxygen_sel,
+                selection=self.selection_oxygen,
                 value=np.NaN,
             ),
             f"acceptor_z_{self.label}": DataRequirement(
                 f"acceptor_z_{self.label}",
                 atomic=True,
                 dim=max_HB,
-                selection=self.oxygen_sel,
+                selection=self.selection_oxygen,
                 value=np.NaN,
             ),
             f"donor_cn_{self.label}": DataRequirement(
                 f"donor_cn_{self.label}",
                 atomic=True,
                 dim=max_HB,
-                selection=self.oxygen_sel,
+                selection=self.selection_oxygen,
                 value=0,
                 dtype=int,
             ),
@@ -72,7 +73,7 @@ class HydrogenBondAnalysis(SingleAnalysis):
                 f"acceptor_cn_{self.label}",
                 atomic=True,
                 dim=max_HB,
-                selection=self.oxygen_sel,
+                selection=self.selection_oxygen,
                 value=0,
                 dtype=int,
             ),
@@ -80,14 +81,14 @@ class HydrogenBondAnalysis(SingleAnalysis):
                 f"da_distance_{self.label}",
                 atomic=True,
                 dim=max_HB,
-                selection=self.oxygen_sel,
+                selection=self.selection_oxygen,
                 value=np.NaN,
             ),
             f"hbond_angle_{self.label}": DataRequirement(
                 f"hbond_angle_{self.label}",
                 atomic=True,
                 dim=max_HB,
-                selection=self.oxygen_sel,
+                selection=self.selection_oxygen,
                 value=np.NaN,
             ),
         }
@@ -96,8 +97,8 @@ class HydrogenBondAnalysis(SingleAnalysis):
         self.ag_hydrogen = None
 
     def _prepare(self, analyser: PlanarInterfaceAnalysisBase):
-        self.ag_oxygen = analyser.universe.select_atoms(self.oxygen_sel)
-        self.ag_hydrogen = analyser.universe.select_atoms(self.hydrogens_sel)
+        self.ag_oxygen = analyser.universe.select_atoms(self.selection_oxygen)
+        self.ag_hydrogen = analyser.universe.select_atoms(self.selection_hydrogen)
 
     def _single_frame(self, analyser: PlanarInterfaceAnalysisBase):
         ts_box = analyser._ts.dimensions
@@ -262,15 +263,15 @@ class HydrogenBondAnalysis(SingleAnalysis):
 class RadialCorrelationFunction(SingleAnalysis):
     def __init__(
         self,
-        oxygen_sel: str = "name O",
-        hydrogens_sel: str = "name H",
+        selection_oxygen: str = "name O",
+        selection_hydrogen: str = "name H",
         label: str = "oxygen",
         d_bin: float = 0.1,
         cutoff: float = 4.5,
     ) -> None:
         super().__init__()
-        self.oxygen_sel = oxygen_sel
-        self.hydrogens_sel = hydrogens_sel
+        self.selection_oxygen = selection_oxygen
+        self.selection_hydrogen = selection_hydrogen
         self.label = label
 
         assert d_bin > 0, "Bin width must be greater than 0."
@@ -283,8 +284,8 @@ class RadialCorrelationFunction(SingleAnalysis):
         self.corr_func = None
 
     def _prepare(self, analyser: PlanarInterfaceAnalysisBase):
-        self.ag_oxygen = analyser.universe.select_atoms(self.oxygen_sel)
-        self.ag_hydrogen = analyser.universe.select_atoms(self.hydrogens_sel)
+        self.ag_oxygen = analyser.universe.select_atoms(self.selection_oxygen)
+        self.ag_hydrogen = analyser.universe.select_atoms(self.selection_hydrogen)
 
         cell_vectors = geometry.cellpar_to_cell(analyser.universe.dimensions)
         cell_vectors = np.delete(cell_vectors, analyser.axis, axis=0)
@@ -387,3 +388,64 @@ class RadialCorrelationFunction(SingleAnalysis):
         corr_func = np.mean(self.corr_func, axis=0)
         # normalised corr_func to the first bin
         self.results.corr_func = corr_func / corr_func[:, 0][:, np.newaxis]
+
+
+
+class HydrogenBondDensityAnalysis(HydrogenBondAnalysis):
+    """
+    Extend HydrogenBondAnalysis to compute per-frame H-bond density distribution.
+    Results are stored directly in the 'results' object, including bins, bottom/top/sym_avg densities.
+    """
+    def __init__(
+        self,
+        selection_oxygen="name O",
+        selection_hydrogen="name H",
+        label: str = "oxygen""oxygen",
+        OH_cutoff=1.3,
+        HB_cutoff: Dict[str, float] = None,
+        max_HB=4,
+        bin_width: float = 0.5,
+    ):
+        super().__init__(
+            selection_oxygen=selection_oxygen,
+            selection_hydrogen=selection_hydrogen,
+            label=label,
+            OH_cutoff=OH_cutoff,
+            HB_cutoff=HB_cutoff,
+            max_HB=max_HB,
+        )
+        self.bin_width = bin_width
+
+    def _conclude(self, analyser: PlanarInterfaceAnalysisBase):
+        # Call parent class to compute original H-bond data
+        super()._conclude(analyser)
+
+        # Get liquid layer thickness per frame
+        r_surf_lg = analyser.r_surf_hi - analyser.r_surf_lo
+
+        # Extract H-bond data
+        hbonds = self.results.hbonds
+        df_hbonds = pd.DataFrame(hbonds, columns=[
+            "frame_index", "z_donor", "z_acceptor", "distance", "angle", "CN_donor", "CN_acceptor"
+        ])
+        df_hbonds["Bulk_length"] = df_hbonds["frame_index"].astype(int).map(lambda i: r_surf_lg[i])
+
+        # Build histogram bins
+        max_bulk = np.max(r_surf_lg)
+        bins = np.arange(0, max_bulk + self.bin_width, self.bin_width)
+
+        # Compute bottom layer density
+        bottom_counts, _ = np.histogram(df_hbonds["z_donor"], bins=bins)
+        # Compute top layer density (reference from top surface)
+        top_counts, _ = np.histogram(df_hbonds["Bulk_length"] - df_hbonds["z_donor"], bins=bins)
+        # Compute symmetric average density
+        sym_avg = 0.5 * (bottom_counts + top_counts)
+
+        # Store results in self.results
+        self.results.bins = bins
+        self.results.bottom_density = bottom_counts
+        self.results.top_density = top_counts
+        self.results.sym_avg_density = sym_avg
+
+        print(f"[Info] HydrogenBondDensityAnalysis '{self.label}' results updated with density histograms.")
+
